@@ -1,40 +1,39 @@
 #!/usr/bin/env python3
-# Roger Volden
-# edited for guppy by Kayla Schimke
-
-'''
-Live guppy basecaller
-
-Usage:
-    python3 PLNK.py -i /path/to/fast5/files/ -o /output/path/ [options]
-'''
+# Kayla Schimke
+# Contributors: Roger Volden
 
 import sys
 import os
 import glob
 import re
+import argparse
 import numpy as np
 import mappy as mp
 import time as t
 
+VERSION = 'v1.0.1'
+
 def commandline():
-    import argparse
-    parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument('--input','-i', type=str, help='directory containing fast5 files')
-    parser.add_argument('--output','-o', type=str, help='path to directory to create and store output')
-    parser.add_argument('--splint','-s', type=str, help='absolute path for splint fasta')
-    parser.add_argument('--samples','-sm', type=str, default=None, help="absolute path to a tsv file containing sample data\
-                                                                        Format: Splint #\t5' index\t3' index\tSample Name")
-    parser.add_argument('--targets','-b', type=str, help='absolute path to bed file containing sites of interest')
-    parser.add_argument('--reference','-r', type=str, help='absolute path to reference genome')
-    parser.add_argument('--adapter','-a', type=str, help='absolute path for adapter fasta')
+    '''Parses arguments.'''
+    parser = argparse.ArgumentParser(description='Processes and quantifies reads from an active ONT sequencing run.',
+                                     prog='PLNK', add_help=True, prefix_chars='-',
+                                     usage='%(prog).py -i [fast5s] [options] [>sample data]')
+    parser.add_argument('--input','-i', type=str, required=True, help='Directory containing fast5 files.')
+    parser.add_argument('--output','-o', type=str, default=os.getcwd(), help='Directory to create and store output. Defaults to current directory.')
+    parser.add_argument('--splint','-s', type=str, required=True, help='Absolute path to splint fasta')
+    parser.add_argument('--samples','-sm', type=str, required=True, help="Absolute path to a tsv file containing sample data\
+                                                                        Format: Splint Name\t5' index\t3' index\tSample Name")
+    parser.add_argument('--targets','-t', type=str, required=True, help='Absolute path to bed file containing sites of interest.')
+    parser.add_argument('--reference','-r', type=str, required=True, help='Absolute path to reference genome (fasta).')
+    parser.add_argument('--adapter','-a', type=str, required=True, help='Absolute path for adapter fasta.')
     # parser.add_argument('--index','-x', type=str, help='absolute path to oligodt indexes')
-    parser.add_argument('--config','-c', type=str, help='absolute path to config file')
-    parser.add_argument('--consensus','-n', type=str, help='path to directory containing C3POa scripts')
-    parser.add_argument('--threads', '-t', type=int, help='number of CPU threads')
-    parser.add_argument('--cuda', '-g', type=str, help='number or list of numbers specifying GPUs')
-    parser.add_argument('--timer', '-tr', action='store', nargs='?', const=True, default=False, help='output run time metrics')
-    parser.add_argument('--verbose', '-v', action='store', nargs='?', const=True, default=False, help='print to console')
+    parser.add_argument('--config','-c', type=str, required=True, help='Absolute path to config file.')
+    parser.add_argument('--consensus','-C', type=str, required=True, help='Path to directory containing C3POa scripts.')
+    parser.add_argument('--threads', '-n', type=int, default=1, help='Number of CPU threads to use when processing. Defaults to 1.')
+    parser.add_argument('--cuda', '-g', type=str, required=True, help='Number or list of numbers specifying GPUs.')
+    parser.add_argument('--timer', '-T', action='store_true', help='Print runtime metrics to standard out.')
+    parser.add_argument('--verbose', '-V', action='store_true', help='Print tool log text to standard error, otherwise create log files for each tool.')
+    parser.add_argument('--version', '-v', action='version', version='%(prog) '+VERSION, help='Prints the PLNK version.')
 
     args = parser.parse_args()
     return args
@@ -42,17 +41,17 @@ def commandline():
 def parseTargets(bedfile, samplefile):
     splint_list = set()
     sample_list = set()
-    onTarget = {}
-    all = {}
+    on_target = {}
+    total_reads = {}
     for line in open(samplefile):
         l = line.strip().split('\t')
         splint_list.add(l[0])
         sample = l[3]
         sample_list.add(sample)
-        onTarget[sample] = 0
-        all[sample] = 0
+        on_target[sample] = 0
+        total_reads[sample] = 0
 
-    coverageDict={sample:{} for sample in sample_list}
+    coverage_dict={sample:{} for sample in sample_list}
     for line in open(bedfile):
         # maybe add a thing to check for bed file headers
         l = line.strip().split('\t')
@@ -62,10 +61,10 @@ def parseTargets(bedfile, samplefile):
         for sample in sample_list:
             for base in range(start,end,1):
                 chr_base = chr+'_'+str(base)
-                if chr_base not in coverageDict:
-                    coverageDict[sample][chr_base]=0
+                if chr_base not in coverage_dict:
+                    coverage_dict[sample][chr_base]=0
 
-    return splint_list, sample_list, all, onTarget, coverageDict
+    return splint_list, sample_list, total_reads, on_target, coverage_dict
 
 def getFileList(query_path):
     '''Takes a path and returns a list of fast5 files excluding the most recent fast5.'''
@@ -77,8 +76,8 @@ def getFileList(query_path):
     return file_list
 
 def main():
-    args = commandline()
     script_start = t.time()
+    args = commandline()
 
     query_path = args.input
     if not query_path.endswith('/'):
@@ -95,7 +94,7 @@ def main():
         os.mkdir(output_path)
 
     if args.verbose: sys.stderr.write('Parsing target and sample data: {0}, {1}\n'.format(args.targets,args.samples))
-    splint_list, sample_list, all, onTarget, coverageDict = parseTargets(args.targets,args.samples)
+    splint_list, sample_list, total_reads, on_target, coverage_dict = parseTargets(args.targets,args.samples)
 
     if args.verbose: sys.stderr.write('Initializing aligner with reference: {0}\n'.format(args.reference))
     mm_align = mp.Aligner(args.reference, preset='sr')
@@ -107,9 +106,10 @@ def main():
 
     finished = set()
     while True:
-        fileList = getFileList(query_path)
-        for fast5 in fileList:
-            f5_filename = fast5.split('/')[-1]
+        file_list = getFileList(query_path)
+        for f5_path in file_list:
+            process_start = t.time() - script_start
+            f5_filename = f5_path.split('/')[-1]
             f5_basename = f5_filename.split('.')[0]
 
             if f5_filename in finished:
@@ -117,9 +117,7 @@ def main():
             if f5_filename not in os.listdir(tmp_path):
                 # symbolic link for the file to not take up extra storage
                 if args.verbose: sys.stderr.write('Linking fast5 file: {0}\n'.format(f5_filename))
-                os.system('cp {0} {1}'.format(fast5, tmp_path))
-
-            start_time = t.time() - script_start
+                os.system('cp {0} {1}'.format(f5_path, tmp_path))
 
             current_path = output_path + f5_basename + '/'
             os.mkdir(current_path)
@@ -150,30 +148,37 @@ def main():
             if args.verbose: sys.stderr.write('Demultiplexing {0}\n'.format(f5_basename))
             os.system('python3 {0} {1} {2}'.format('~/Downloads/BWN/demultiplexBWNsamplesheet.py',args.samples,consensus_path))
 
-            for sample in sorted(sample_list):
+            for sample in sample_list:
                 for name, sequence, quality in mp.fastx_read(consensus_path+'demultiplexed/'+sample+'.fasta'):
-                    all[sample] += 1
+                    total_reads[sample] += 1
                     matched = False
                     for hit in mm_align.map(sequence):
                         if hit.is_primary:
                             chr, start, end = hit.ctg, hit.r_st, hit.r_en
                             for base in range(start,end,1):
                                 chr_base = chr+'_'+str(base)
-                                if chr_base in coverageDict[sample]:
-                                    coverageDict[sample][chr_base] +=1
+                                if chr_base in coverage_dict[sample]:
+                                    coverage_dict[sample][chr_base] +=1
                                     matched=True
                     if matched:
-                        onTarget[sample] += 1
+                        on_target[sample] += 1
 
-            end_time = t.time() - script_start
+            print('{0}\t{1}'.format(f5_filename,sum(total_reads.values())))
+            for sample in sorted(sample_list):
+                coverage_list = list(coverage_dict[sample].values())
+                percent_total = round((total_reads[sample] / sum(total_reads.values())) * 100, 2)
+                percent_on_target = round((on_target[sample] / total_reads[sample]) * 100, 2)
+                print('{0}\t{1}\t{2}%\t{3}\t{4}%\t{5}'.format(sample,total_reads[sample],percent_total \
+                                                              on_target[sample],percent_on_target, \
+                                                              np.median(coverage_list)))
+
             if args.timer:
-                print('{0}\t{1}\t{2}\t{3}\t{4}\t{5}'.format(f5_filename,os.path.getctime(fast5)-script_start,start_time,end_time,end_time-start_time,sum(all.values())))
-            else:
-                print(f5_filename,sum(all.values()))
+                process_end = t.time() - script_start
+                f5_created = os.path.getctime(f5_path) - script_start
+                print('{0}\t{1}\t{2}'.format(f5_created,process_start,process_end))
 
-            for sample in coverageDict:
-                coverageList=list(coverageDict[sample].values())
-                print('{0}\t{1}\t{2}%\t{3}\t{4}%\t{5}\t{6}\t{7}'.format(sample,all[sample],(all[sample]/sum(all.values()))*100,onTarget[sample],(onTarget[sample]/all[sample])*100, np.median(coverageList),np.percentile(coverageList,25),np.percentile(coverageList,75)))
+                if args.verbose: sys.stderr.write('Elapsed time processing {0}: {1} seconds\n'.format(f5_filename,process_end-process_start))
+
 
             finished.add(f5_filename)
 
