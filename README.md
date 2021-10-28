@@ -7,6 +7,6 @@ Expects R2C2 reads using samples previously prepped for Illumina sequencing.
 
 - [Python 3](https://www.python.org/downloads/)
 - [NumPy](https://pypi.org/project/numpy/)
-- [guppy]()
+- [guppy](https://community.nanoporetech.com/downloads) (requires login)
 - [C3Poa](https://github.com/rvolden/C3POa)
 - [mappy](https://pypi.org/project/mappy/)
