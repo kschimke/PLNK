@@ -17,16 +17,20 @@ Expects R2C2 reads using samples previously prepped for Illumina sequencing.
 
 ## Usage
 
+After resolving all of the dependencies, PLNK will take <3 minutes to install and runs with python.
+
+## PLNK.py
+
 ```bash
 python3 PLNK.py -i /path/to/fast5/directory/ 
-                -o output/path 
+                -o /path/to/output/directory/ 
                 -s splint.fasta 
                 -sm samplesheet.tsv
                 -t target.bed
                 -r reference.fasta
                 -a adapter.fasta
                 -c config 
-                -C /path/to/C3Poa/directory
+                -C /path/to/C3Poa/directory/
                 -n 1
                 -g 0 
 ```
@@ -81,4 +85,25 @@ output_dir
 │   │       ├── R2C2_full_length_consensus_reads.fasta
 │   │       ├── R2C2_full_length_consensus_reads_left_splint.fasta
 │   │       └── R2C2_full_length_consensus_reads_right_splint.fasta
+```
+--------------------------------------------------------------------------------
+
+## sequencing_simulator.py
+
+Simulates a MinION sequencing run by copying fast5 files from the input directory to an 
+output directory at a specified rate or by comparing the metadata of the input files.
+
+```bash
+python3 sequencing_simulator.py -i /path/to/fast5/directory/ 
+                                -o /path/to/output/directory/ 
+                                -r 1.5  
+```
+Arguments:
+```
+-i  directory containing fast5 files from a previous sequencing run
+
+-o  directory fast5 files will be copied over to
+
+-r  a float specifying the number of minutes between file transfers, 
+    defaults to extrapolating a rate from the fast5s' metadata
 ```
