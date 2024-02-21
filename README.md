@@ -1,4 +1,6 @@
 # PLNK
+## Processing Live Nanopore Runs
+
 PLNK runs alongside an Oxford Nanopore MinION sequencer, processing individual fast5 files using guppy for basecalling, C3POa for R2C2 consensus calling, and mappy for alignment before analyzing the library content.
 
 Expects R2C2 reads using samples previously prepped for Illumina sequencing. 
